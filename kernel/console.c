@@ -129,6 +129,8 @@ static ushort *crt = (ushort*)P2V(0xb8000);  // CGA memory
 static void
 cgaputc(int c)
 {
+	static int count = 0;
+
 	int pos;
 
 	// Cursor position: col + 80*row.
@@ -137,12 +139,17 @@ cgaputc(int c)
 	outb(CRTPORT, 15);
 	pos |= inb(CRTPORT+1);
 
+	count -= count && c == ']';
+
 	if(c == '\n')
 		pos += 80 - pos%80;
 	else if(c == BACKSPACE){
 		if(pos > 0) --pos;
-	} else
-		crt[pos++] = (c&0xff) | 0x0700;  // black on white
+	} 
+	else
+		crt[pos++] = (c&0xff) | (count ? 0x0200 : 0x0700);  // black on white
+
+	count += c == '[';
 
 	if(pos < 0 || pos > 25*80)
 		panic("pos under/overflow");
