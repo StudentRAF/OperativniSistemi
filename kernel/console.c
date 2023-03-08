@@ -137,12 +137,18 @@ cgaputc(int c)
 	outb(CRTPORT, 15);
 	pos |= inb(CRTPORT+1);
 
+	static int color = 0x06;
+
+	char isDigit = c > 0x2F && c < 0x3A;
+
 	if(c == '\n')
 		pos += 80 - pos%80;
 	else if(c == BACKSPACE){
 		if(pos > 0) --pos;
 	} else
-		crt[pos++] = (c&0xff) | 0x0700;  // black on white
+		crt[pos++] = (c&0xff) | (isDigit ? (color + 1) << 8 : 0x0700);  // black on white
+
+	color = (color + isDigit) % 0x0E;
 
 	if(pos < 0 || pos > 25*80)
 		panic("pos under/overflow");
