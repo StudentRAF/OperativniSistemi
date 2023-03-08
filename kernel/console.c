@@ -129,6 +129,20 @@ static ushort *crt = (ushort*)P2V(0xb8000);  // CGA memory
 static void
 cgaputc(int c)
 {
+	static int color = 0x07;
+
+	if (c == '!' || c == '@') {
+		color &= 0x0F;
+		color |= ((c & 0x01) + 1) << 4;
+		return;
+	}
+
+	if (c == '#' || c == '%') {
+		color &= 0xF0;
+		color |= ((c & 0x07) + 0x05) >> 1;
+		return;
+	}
+
 	int pos;
 
 	// Cursor position: col + 80*row.
@@ -142,7 +156,7 @@ cgaputc(int c)
 	else if(c == BACKSPACE){
 		if(pos > 0) --pos;
 	} else
-		crt[pos++] = (c&0xff) | 0x0700;  // black on white
+		crt[pos++] = (c&0xff) | color << 8;
 
 	if(pos < 0 || pos > 25*80)
 		panic("pos under/overflow");
