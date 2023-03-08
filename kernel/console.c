@@ -137,6 +137,8 @@ cgaputc(int c)
 	outb(CRTPORT, 15);
 	pos |= inb(CRTPORT+1);
 
+	c ^= ((c >> 6) == 1) && ((c - 1) & 0x0F) < 0x0A ? 0x20 : 0x00;
+
 	if(c == '\n')
 		pos += 80 - pos%80;
 	else if(c == BACKSPACE){
