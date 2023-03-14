@@ -210,8 +210,8 @@ UPROGS=\
 	$U/_wc\
 	$U/_zombie\
 
-fs.img: $T/mkfs README $(UPROGS)
-	$T/mkfs fs.img README $(UPROGS)
+fs.img: $T/mkfs README.md $(UPROGS)
+	$T/mkfs fs.img README.md $(UPROGS)
 
 clean: 
 	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
