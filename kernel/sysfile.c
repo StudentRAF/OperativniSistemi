@@ -52,6 +52,16 @@ fdalloc(struct file *f)
 	return -1;
 }
 
+int sys_filesystem(void) {
+    int flag;
+    int* stash;
+
+    if(argint(0, &flag) < 0  || argptr(1, (void*)&stash, 1) < 0)
+        return -1;
+
+    return statfs(flag, stash);
+}
+
 int
 sys_dup(void)
 {

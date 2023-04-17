@@ -12,11 +12,13 @@ HDRS = \
 	$K/fcntl.h\
 	$K/file.h\
 	$K/fs.h\
+	$K/fsstat.h\
 	$K/kbd.h\
 	$K/memlayout.h\
 	$K/mmu.h\
 	$K/mp.h\
 	$K/param.h\
+	$K/paramfs.h\
 	$K/proc.h\
 	$K/sleeplock.h\
 	$K/spinlock.h\
@@ -197,6 +199,7 @@ UPROGS=\
 	$U/_cat\
 	$U/_echo\
 	$U/_forktest\
+	$U/_fs\
 	$U/_grep\
 	$U/_init\
 	$U/_kill\

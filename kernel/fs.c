@@ -18,6 +18,7 @@
 #include "spinlock.h"
 #include "sleeplock.h"
 #include "fs.h"
+#include "fsstat.h"
 #include "buf.h"
 #include "file.h"
 
@@ -662,3 +663,206 @@ nameiparent(char *path, char *name)
 {
 	return namex(path, 1, name);
 }
+
+#define BMAP_BLOCK_COUNT (FSSIZE / BPB + 1)
+#define INODE_BLOCK_COUNT(superblock) (superblock.ninodes / IPB + 1)
+
+int fetchDataBlockCount(int* stash);
+int fetchOccupiedBlockCount(int* stash);
+int fetchFreeBlockCount(int* stash);
+int fetchFileSystemEntryCount(int* stash);
+int fetchDirectoryCount(int* stash);
+int fetchFileCount(int* stash);
+int fetchDeviceCount(int* stash);
+int fetchFilesSize(int* stash);
+int fetchFilesOccupiedSize(int* stash);
+
+static int (*fileSystemData[])(int* stash) = {
+    [POS_DATA_BLOCK_COUNT]        fetchDataBlockCount,
+    [POS_OCCUPIED_BLOCK_COUNT]    fetchOccupiedBlockCount,
+    [POS_FREE_BLOCK_COUNT]        fetchFreeBlockCount,
+    [POS_FILE_SYSTEM_ENTRY_COUNT] fetchFileSystemEntryCount,
+    [POS_DIRECTORY_COUNT]         fetchDirectoryCount,
+    [POS_FILE_COUNT]              fetchFileCount,
+    [POS_DEVICE_COUNT]            fetchDeviceCount,
+    [POS_FILES_SIZE]              fetchFilesSize,
+    [POS_FILES_OCCUPIED_SIZE]     fetchFilesOccupiedSize,
+};
+
+int statfs(int flag, int* stash) {
+    int position = 0;
+
+    while(flag >>= 1)
+        ++position;
+
+    if(position >= NELEM(fileSystemData))
+        return -1;
+
+    stash[0] = 0;
+
+    return fileSystemData[position](stash);
+}
+
+int fetchDataBlockCount(int* stash) {
+    stash[0] = sb.nblocks;
+
+    return 0;
+}
+
+//region Bit Map Data
+
+#define BMD_OCCUPIED_BLOCK_COUNT 0
+#define BMD_FREE_BLOCK_COUNT     1
+
+void bitMapDataOccupiedBlockCount(int* stash, const uchar* blockData, int bit);
+void bitMapDataFreeBlockCount(int* stash, const uchar* blockData, int bit);
+
+static void (*bitMapData[])(int*, const uchar*, int) = {
+    [BMD_OCCUPIED_BLOCK_COUNT] bitMapDataOccupiedBlockCount,
+    [BMD_FREE_BLOCK_COUNT]     bitMapDataFreeBlockCount,
+};
+
+int fetchBitMapData(int* stash, int type) {
+    struct buf* blockPointer;
+    uchar* blockData;
+
+    int remainingBits = FSSIZE;
+    int bitsInCurrentBlock;
+
+    for(int bitMapBlock = 0; bitMapBlock < BMAP_BLOCK_COUNT; ++bitMapBlock, remainingBits -= BPB) {
+        blockPointer = bread(ROOTDEV, sb.bmapstart + bitMapBlock);
+        blockData = blockPointer->data;
+        bitsInCurrentBlock = min(remainingBits, BPB);
+
+        for(int bit = 0; bit < bitsInCurrentBlock; ++bit)
+            bitMapData[type](stash, blockData, bit);
+
+        brelse(blockPointer);
+    }
+
+    return 0;
+}
+
+void bitMapDataOccupiedBlockCount(int* stash, const uchar* blockData, int bit) {
+    stash[0] += (blockData[bit / 8] & 1 << (bit % 8)) > 0;
+}
+
+int fetchOccupiedBlockCount(int* stash) {
+    stash[0] -= FSSIZE - sb.nblocks;
+
+    return fetchBitMapData(stash, BMD_OCCUPIED_BLOCK_COUNT);;
+}
+
+void bitMapDataFreeBlockCount(int* stash, const uchar* blockData, int bit) {
+    stash[0] += (blockData[bit / 8] & 1 << (bit % 8)) == 0;
+}
+
+int fetchFreeBlockCount(int* stash) {
+    return fetchBitMapData(stash, BMD_FREE_BLOCK_COUNT);
+}
+
+//endregion Bit Map Data
+
+//region INode Data
+
+#define IND_ENTRY_COUNT        0
+#define IND_DIRECTORY_COUNT    1
+#define IND_FILE_COUNT         2
+#define IND_DEVICE_COUNT       3
+#define IND_FILE_SIZE          4
+#define IND_FILE_OCCUPIED_SIZE 5
+
+void iNodeDataEntryCount(int* stash, const struct dinode* dinode);
+void iNodeDataDirectoryCount(int* stash, const struct dinode* dinode);
+void iNodeDataFileCount(int* stash, const struct dinode* dinode);
+void iNodeDataDeviceCount(int* stash, const struct dinode* dinode);
+void iNodeDataFileSize(int* stash, const struct dinode* dinode);
+void iNodeDataFileOccupiedSize(int* stash, const struct dinode* dinode);
+
+static void (*iNodeData[])(int*, const struct dinode*) = {
+    [IND_ENTRY_COUNT]        iNodeDataEntryCount,
+    [IND_DIRECTORY_COUNT]    iNodeDataDirectoryCount,
+    [IND_FILE_COUNT]         iNodeDataFileCount,
+    [IND_DEVICE_COUNT]       iNodeDataDeviceCount,
+    [IND_FILE_SIZE]          iNodeDataFileSize,
+    [IND_FILE_OCCUPIED_SIZE] iNodeDataFileOccupiedSize,
+};
+
+int fetchINodeData(int* stash, short filter, int type) {
+    struct dinode* dinode;
+    struct buf* blockPointer;
+    uchar* blockData;
+
+    int remainingInodes = sb.ninodes;
+    int inodesInCurrentBlock;
+
+    for(int inodeBlock = 0; inodeBlock < INODE_BLOCK_COUNT(sb); ++inodeBlock, remainingInodes -= IPB) {
+        blockPointer = bread(ROOTDEV, sb.inodestart + inodeBlock);
+        blockData = blockPointer->data;
+
+        inodesInCurrentBlock = min(remainingInodes, IPB);
+
+        for(int inodeIndex = 0; inodeIndex < inodesInCurrentBlock; ++inodeIndex) {
+            memmove(dinode, blockData + inodeIndex * sizeof(*dinode), sizeof(*dinode));
+
+            if((dinode->type & filter) == 0)
+                continue;
+
+            iNodeData[type](stash, dinode);
+        }
+
+        brelse(blockPointer);
+    }
+
+    return 0;
+}
+
+void iNodeDataEntryCount(int* stash, const struct dinode* dinode) {
+    ++stash[0];
+}
+
+int fetchFileSystemEntryCount(int* stash) {
+    return fetchINodeData(stash, T_DIR | T_FILE | T_DEV, IND_ENTRY_COUNT);
+}
+
+void iNodeDataDirectoryCount(int* stash, const struct dinode* dinode) {
+    ++stash[0];
+}
+
+int fetchDirectoryCount(int* stash) {
+    return fetchINodeData(stash, T_DIR, IND_DIRECTORY_COUNT);
+}
+
+void iNodeDataFileCount(int* stash, const struct dinode* dinode) {
+    ++stash[0];
+}
+
+int fetchFileCount(int* stash) {
+    return fetchINodeData(stash, T_FILE, IND_FILE_COUNT);
+}
+
+void iNodeDataDeviceCount(int* stash, const struct dinode* dinode) {
+    ++stash[0];
+}
+
+int fetchDeviceCount(int* stash) {
+    return fetchINodeData(stash, T_DEV, IND_DEVICE_COUNT);
+}
+
+void iNodeDataFileSize(int* stash, const struct dinode* dinode) {
+    stash[0] += dinode->size;
+}
+
+int fetchFilesSize(int* stash) {
+    return fetchINodeData(stash, T_FILE, IND_FILE_SIZE);
+}
+
+void iNodeDataFileOccupiedSize(int* stash, const struct dinode* dinode) {
+    stash[0] += (dinode->size / BSIZE + 1) * BSIZE;
+}
+
+int fetchFilesOccupiedSize(int* stash) {
+    return fetchINodeData(stash, T_FILE, IND_FILE_OCCUPIED_SIZE);
+}
+
+//endregion INode Data
