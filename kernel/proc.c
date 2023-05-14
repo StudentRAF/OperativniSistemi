@@ -321,12 +321,11 @@ wait(void)
 void
 scheduler(void)
 {
-	int idle;
+	int idle = 0;
 	struct proc *p;
 	struct cpu *c = mycpu();
 	c->proc = 0;
 
-	idle = 0;
 	for(;;){
 		// Enable interrupts on this processor.
 		sti();
@@ -344,6 +343,7 @@ scheduler(void)
 				continue;
 
 			idle = 0;
+
 			// Switch to chosen process.  It is the process's job
 			// to release ptable.lock and then reacquire it
 			// before jumping back to us.
